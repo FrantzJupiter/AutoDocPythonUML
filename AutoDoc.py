@@ -13,7 +13,7 @@ def get_link(file_path, line, root_dir, is_web=False, repo_url=""):
         if is_web and repo_url:
             rel_path = abs_path.relative_to(root_dir).as_posix()
             clean_repo = repo_url.rstrip('/')
-            return f"{clean_repo}/blob/main/{rel_path}#L{line}"
+            return f"{clean_repo}/blob/Main/{rel_path}#L{line}"
         else:
             posix_path = abs_path.as_posix()
             if ':' in posix_path and not posix_path.startswith('/'): 
