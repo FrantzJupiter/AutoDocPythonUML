@@ -2,6 +2,7 @@ import ast
 import os
 import sys
 import urllib.parse
+import argparse
 from pathlib import Path
 from collections import deque, defaultdict
 
@@ -9,16 +10,26 @@ from collections import deque, defaultdict
 # 1. HELPERS E LINKS
 # ==========================================
 
-def create_vscode_link(file_path, line):
+def get_link(file_path, line, root_dir, is_web=False, repo_url=""):
+    """Gera links dinamicamente: locais (vscode://) ou remotos (GitHub/Web)."""
     try:
-        abs_path = os.path.abspath(file_path)
-        path_obj = Path(abs_path)
-        posix_path = path_obj.as_posix()
-        if ':' in posix_path and not posix_path.startswith('/'): 
-            posix_path = '/' + posix_path
-        encoded_path = urllib.parse.quote(posix_path)
-        return f"vscode://file{encoded_path}:{line}"
-    except: return "#"
+        abs_path = Path(file_path).resolve()
+        
+        if is_web and repo_url:
+            # Caminho relativo a partir da raiz do projeto para o GitHub
+            rel_path = abs_path.relative_to(root_dir).as_posix()
+            clean_repo = repo_url.rstrip('/')
+            # Formato padrão do GitHub: url/blob/main/caminho#Llinha
+            return f"{clean_repo}/blob/main/{rel_path}#L{line}"
+        else:
+            # Lógica original do VS Code
+            posix_path = abs_path.as_posix()
+            if ':' in posix_path and not posix_path.startswith('/'): 
+                posix_path = '/' + posix_path
+            encoded_path = urllib.parse.quote(posix_path)
+            return f"vscode://file{encoded_path}:{line}"
+    except Exception: 
+        return "#"
 
 def format_annotation(node):
     if node is None: return "Any"
@@ -140,7 +151,10 @@ class ProjectAnalyzer:
         me = Path(__file__).resolve()
 
         for path in py_files:
-            if path.resolve() == me: continue
+            # CORREÇÃO: Ignora o próprio script APENAS se ele NÃO for o alvo (entry_point)
+            if path.resolve() == me and self.entry_point != me: 
+                continue
+                
             try:
                 with open(path, "r", encoding="utf-8") as f: source = f.read()
                 tree = ast.parse(source, filename=str(path))
@@ -188,7 +202,7 @@ class ProjectAnalyzer:
         for dec in class_node.decorator_list:
             if isinstance(dec, ast.Name) and dec.id == 'dataclass': cls_info.is_dataclass = True
 
-        # CORREÇÃO 1: Atributos via Type Hint (Dataclasses)
+        # Atributos via Type Hint (Dataclasses)
         for item in class_node.body:
             if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
                 t_str = format_annotation(item.annotation)
@@ -208,7 +222,7 @@ class ProjectAnalyzer:
 
     def _analyze_method_body(self, cls_info, method_node, file_scope):
         method_scope = file_scope.copy()
-        local_instances = {} # CORREÇÃO 2: Rastrear instâncias criadas LOCALMENTE (Composição)
+        local_instances = {} # Rastrear instâncias criadas LOCALMENTE (Composição)
 
         # Argumentos do método entram no escopo
         for arg in method_node.args.args:
@@ -225,10 +239,9 @@ class ProjectAnalyzer:
 
         for stmt in ast.walk(method_node):
             
-            # CORREÇÃO 1: Detectar atributos self.x = valor
+            # Detectar atributos self.x = valor
             if isinstance(stmt, ast.Assign):
                 for target in stmt.targets:
-                    # Se for self.algo = ...
                     if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == 'self':
                         inferred_type = infer_simple_type(stmt.value)
                         cls_info.add_attr(target.attr, inferred_type, stmt.lineno)
@@ -238,23 +251,18 @@ class ProjectAnalyzer:
                 cls_name = stmt.value.func.id
                 real_cls = file_scope.get(cls_name, cls_name)
                 
-                # Se instanciou uma classe conhecida
                 if real_cls in self.global_classes:
                     for target in stmt.targets:
-                        # Se salvou em self.algo (self.motor = Motor()) -> Composição
                         if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == 'self':
                             cls_info.add_relation('comp', real_cls)
-                        # Se salvou em variável local (motor = Motor()) -> Guarda para ver se usa depois
                         elif isinstance(target, ast.Name):
                             local_instances[target.id] = real_cls
-                            # Dependência temporária
                             cls_info.add_relation('dep', real_cls)
 
             # Detectar append: self.lista.append(obj)
             if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                 func = stmt.value.func
                 if isinstance(func, ast.Attribute) and func.attr == 'append':
-                    # Verifica se é self.lista.append
                     is_self_attr = (isinstance(func.value, ast.Attribute) and 
                                     isinstance(func.value.value, ast.Name) and 
                                     func.value.value.id == 'self')
@@ -262,19 +270,15 @@ class ProjectAnalyzer:
                     if is_self_attr and stmt.value.args:
                         arg = stmt.value.args[0]
                         
-                        # Caso 1: append(Classe()) -> Composição
                         if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name):
                             name = arg.func.id
                             if name in file_scope: 
                                 cls_info.add_relation('comp', file_scope[name], "1..*")
 
-                        # Caso 2: append(variavel) -> Verificar origem da variável
                         elif isinstance(arg, ast.Name):
                             var_name = arg.id
-                            # CORREÇÃO 2: Se a variável foi criada localmente -> Composição
                             if var_name in local_instances:
                                 cls_info.add_relation('comp', local_instances[var_name], "1..*")
-                            # Se a variável veio de fora (args) -> Agregação
                             elif var_name in method_scope:
                                 cls_info.add_relation('agg', method_scope[var_name], "0..*")
 
@@ -356,10 +360,10 @@ class ProjectAnalyzer:
 # 4. GERAÇÃO DE MARKDOWN
 # ==========================================
 
-def generate_markdown(classes, flow, title):
+def generate_markdown(classes, flow, title, root_dir, is_web=False, repo_url=""):
     lines = []
     lines.append(f"# 📘 Documentação: {title}")
-    lines.append(f"> Gerado automaticamente via `AutoDoc.py`")
+    lines.append(f"> Gerado automaticamente via AutoDoc.py - Criado por [FrantzJupiter](https://github.com/FrantzJupiter/AutoDocUML)")
     
     if flow:
         lines.append("\n## 🚀 Fluxo de Execução (Main)")
@@ -427,19 +431,19 @@ def generate_markdown(classes, flow, title):
     for filename in sorted(by_file.keys()):
         lines.append(f"\n### 📂 `{filename}`")
         for cls in sorted(by_file[filename], key=lambda x: x.name):
-            link = create_vscode_link(cls.filepath, cls.lineno)
+            link = get_link(cls.filepath, cls.lineno, root_dir, is_web, repo_url)
             lines.append(f"- 🟡 **[{cls.name}]({link})** (Linha {cls.lineno})")
             
             if cls.attrs:
                 lines.append("  - **Atributos:**")
                 for attr, info in cls.attrs.items():
-                    l = create_vscode_link(cls.filepath, info['line'])
+                    l = get_link(cls.filepath, info['line'], root_dir, is_web, repo_url)
                     lines.append(f"    - 🔹 [{attr}]({l}) : `{info['type']}`")
             
             if cls.methods:
                 lines.append("  - **Métodos:**")
                 for m in cls.methods:
-                    l = create_vscode_link(cls.filepath, m['line'])
+                    l = get_link(cls.filepath, m['line'], root_dir, is_web, repo_url)
                     lines.append(f"    - 🔸 [{m['name']}()]({l})")
     
     return "\n".join(lines)
@@ -448,11 +452,15 @@ if __name__ == "__main__":
     if sys.stdout.encoding != 'utf-8':
         try: sys.stdout.reconfigure(encoding='utf-8')
         except: pass
-    if len(sys.argv) < 2:
-        print("Uso: python AutoDoc.py <arquivo_principal.py>")
-        sys.exit(1)
+        
+    parser = argparse.ArgumentParser(description="Gera documentação UML e fluxos em Markdown a partir de código Python.")
+    parser.add_argument("target_input", help="Caminho para o arquivo principal (.py)")
+    parser.add_argument("--web", action="store_true", help="Gera links para o GitHub em vez do VS Code")
+    parser.add_argument("--repo", default="https://github.com/FrantzJupiter/AutoDocUML", help="URL base do repositório no GitHub")
+    
+    args = parser.parse_args()
+    target_input = args.target_input
 
-    target_input = sys.argv[1]
     if not os.path.exists(target_input):
         print("❌ Arquivo não encontrado."); sys.exit(1)
 
@@ -462,6 +470,19 @@ if __name__ == "__main__":
     if not classes:
         print("⚠️ Nenhuma classe detectada ou escopo vazio."); sys.exit(0)
 
-    output_name = f"Doc_{Path(target_input).stem}.md"
-    with open(output_name, "w", encoding="utf-8") as f: f.write(generate_markdown(classes, flow, Path(target_input).name))
+    output_name = f"AutoDoc_{Path(target_input).stem}.md"
+    
+    # Chama a geração do Markdown passando as flags de web, o repo e o diretório raiz
+    md_content = generate_markdown(
+        classes=classes, 
+        flow=flow, 
+        title=Path(target_input).name, 
+        root_dir=analyzer.root_dir,
+        is_web=args.web, 
+        repo_url=args.repo
+    )
+    
+    with open(output_name, "w", encoding="utf-8") as f: 
+        f.write(md_content)
+        
     print(f"\n✅ Documentação gerada com sucesso: {output_name}")
