@@ -338,7 +338,7 @@ class ProjectAnalyzer:
 def generate_markdown(classes, flow, title, root_dir, is_web=False, repo_url=""):
     lines = []
     lines.append(f"# Documentação: {title}")
-    lines.append(f"> Gerado automaticamente via AutoDoc.py - Criado por [FrantzJupiter](https://github.com/FrantzJupiter/AutoDocUML)")
+    lines.append(f"> Gerado automaticamente via [AutoDoc.py](https://github.com/FrantzJupiter/AutoDocUML) - Criado por [FrantzJupiter](https://github.com/FrantzJupiter)")
     
     if flow:
         lines.append("\n## Fluxo de Execução (Main)")
