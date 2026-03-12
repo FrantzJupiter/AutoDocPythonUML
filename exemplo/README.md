@@ -1,6 +1,5 @@
 # Documentação: main.py
-> Gerado automaticamente via AutoDoc.py - Criado por [FrantzJupiter](https://github.com/FrantzJupiter/AutoDocUML)
-> Este markdown foi gerado baseado no código de exemplo. Para testar, rode o AutoDoc no arquivo main.py do sistema de exemplo.
+> Gerado automaticamente via AutoDoc.py - Criado por [FrantzJupiter](https://github.com/FrantzJupiter/AutoDocUML). Este markdown foi gerado baseado no código de exemplo. Para testar, rode o AutoDoc no arquivo main.py do sistema de exemplo.
 
 ## Fluxo de Execução (Main)
 ```mermaid
