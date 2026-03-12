@@ -125,10 +125,11 @@ class ProjectAnalyzer:
     def __init__(self, entry_point):
         self.entry_point = Path(entry_point).resolve()
         self.root_dir = self.entry_point.parent if self.entry_point.is_file() else self.entry_point
+        self.base_repo_dir = Path.cwd() 
         self.global_classes = {} 
         self.files_ast = {}      
-        self.main_flow = []      
-
+        self.main_flow = []
+        
     def run(self):
         print(f"Indexando projeto a partir de: {self.root_dir}")
         self._step_1_index_files()
