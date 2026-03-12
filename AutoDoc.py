@@ -16,13 +16,10 @@ def get_link(file_path, line, root_dir, is_web=False, repo_url=""):
         abs_path = Path(file_path).resolve()
         
         if is_web and repo_url:
-            # Caminho relativo a partir da raiz do projeto para o GitHub
             rel_path = abs_path.relative_to(root_dir).as_posix()
             clean_repo = repo_url.rstrip('/')
-            # Formato padrão do GitHub: url/blob/main/caminho#Llinha
             return f"{clean_repo}/blob/main/{rel_path}#L{line}"
         else:
-            # Lógica original do VS Code
             posix_path = abs_path.as_posix()
             if ':' in posix_path and not posix_path.startswith('/'): 
                 posix_path = '/' + posix_path
@@ -45,7 +42,7 @@ def format_annotation(node):
     except: return "Any"
 
 def infer_simple_type(node):
-    """Tenta adivinhar o tipo baseado no valor atribuído (ex: 0 -> int)."""
+    """Infere o tipo baseado no valor atribuido no AST."""
     if isinstance(node, ast.Constant):
         return type(node.value).__name__
     elif isinstance(node, ast.List):
@@ -53,7 +50,7 @@ def infer_simple_type(node):
     elif isinstance(node, ast.Dict):
         return "dict"
     elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-        return node.func.id # Ex: Produto(...) -> Produto
+        return node.func.id 
     return "Any"
 
 def get_base_types(node):
@@ -90,7 +87,6 @@ class ClassInfo:
         self.dependencies = set()
 
     def add_attr(self, name, type_str, line):
-        # Só adiciona se não existir ou se o novo tipo for mais específico que "Any"
         if name not in self.attrs or (self.attrs[name]['type'] == 'Any' and type_str != 'Any'):
             self.attrs[name] = {'type': type_str, 'line': line}
 
@@ -102,19 +98,15 @@ class ClassInfo:
     def add_relation(self, kind, target_name, card="1"):
         if target_name == self.name: return 
         
-        # Lógica de Prioridade: Composição > Agregação > Dependência
         if kind == 'comp':
-            # Remove relações mais fracas se existirem
             self.aggregations = {(t, c) for t, c in self.aggregations if t != target_name}
             self.dependencies.discard(target_name)
             self.compositions.add((target_name, card))
         elif kind == 'agg':
-            # Só adiciona Agregação se NÃO for Composição
             if target_name not in [x[0] for x in self.compositions]:
                 self.dependencies.discard(target_name)
                 self.aggregations.add((target_name, card))
         elif kind == 'dep':
-            # Só adiciona Dependência se não houver vínculo forte
             if target_name not in [x[0] for x in self.compositions] and \
                target_name not in [x[0] for x in self.aggregations]:
                 self.dependencies.add(target_name)
@@ -138,7 +130,7 @@ class ProjectAnalyzer:
         self.main_flow = []      
 
     def run(self):
-        print(f"📂 Raiz do projeto: {self.root_dir}")
+        print(f"Indexando projeto a partir de: {self.root_dir}")
         self._step_1_index_files()
         self._step_2_analyze_relationships()
         if self.entry_point.is_file():
@@ -151,7 +143,6 @@ class ProjectAnalyzer:
         me = Path(__file__).resolve()
 
         for path in py_files:
-            # CORREÇÃO: Ignora o próprio script APENAS se ele NÃO for o alvo (entry_point)
             if path.resolve() == me and self.entry_point != me: 
                 continue
                 
@@ -167,19 +158,17 @@ class ProjectAnalyzer:
                             self.global_classes[node.name].filepath = str(path.resolve())
                             self.global_classes[node.name].lineno = node.lineno
             except Exception as e:
-                print(f"⚠️ Erro ao ler {path.name}: {e}")
+                print(f"[Aviso] Falha ao processar {path.name}: {e}")
 
     def _step_2_analyze_relationships(self):
         for file_path, tree in self.files_ast.items():
             local_scope = {} 
-            # Imports
             for node in tree.body:
                 if isinstance(node, ast.ImportFrom):
                     for alias in node.names:
                         real_name = alias.name
                         local_var = alias.asname if alias.asname else alias.name
                         if real_name in self.global_classes: local_scope[local_var] = real_name
-            # Classes Locais
             for node in tree.body:
                 if isinstance(node, ast.ClassDef): local_scope[node.name] = node.name
 
@@ -190,7 +179,6 @@ class ProjectAnalyzer:
     def _analyze_class_ast(self, class_node, scope):
         cls_info = self.global_classes[class_node.name]
         
-        # Herança
         for base in class_node.bases:
             if isinstance(base, ast.Name):
                 if base.id not in cls_info.parents: cls_info.parents.append(base.id)
@@ -198,23 +186,19 @@ class ProjectAnalyzer:
             elif isinstance(base, ast.Attribute):
                  if base.attr not in cls_info.parents: cls_info.parents.append(base.attr)
 
-        # Dataclasses
         for dec in class_node.decorator_list:
             if isinstance(dec, ast.Name) and dec.id == 'dataclass': cls_info.is_dataclass = True
 
-        # Atributos via Type Hint (Dataclasses)
         for item in class_node.body:
             if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
                 t_str = format_annotation(item.annotation)
                 cls_info.add_attr(item.target.id, t_str, item.lineno)
                 self._link_types(cls_info, item.annotation, 'comp' if cls_info.is_dataclass else 'agg', scope)
 
-            # Métodos
             if isinstance(item, ast.FunctionDef):
                 args_list = [a.arg for a in item.args.args if a.arg != 'self']
                 cls_info.add_method(item.name, ", ".join(args_list), item.lineno)
                 
-                # Type hints nos args e return
                 for arg in item.args.args: self._link_types(cls_info, arg.annotation, 'dep', scope)
                 self._link_types(cls_info, item.returns, 'dep', scope)
 
@@ -222,9 +206,8 @@ class ProjectAnalyzer:
 
     def _analyze_method_body(self, cls_info, method_node, file_scope):
         method_scope = file_scope.copy()
-        local_instances = {} # Rastrear instâncias criadas LOCALMENTE (Composição)
+        local_instances = {} 
 
-        # Argumentos do método entram no escopo
         for arg in method_node.args.args:
             if arg.arg == 'self': continue
             types = get_base_types(arg.annotation)
@@ -233,20 +216,17 @@ class ProjectAnalyzer:
                     if t in self.global_classes: 
                         method_scope[arg.arg] = t; break
             else:
-                # Inferência simples por nome (arg cliente -> classe Cliente)
                 for known_cls in self.global_classes:
                     if arg.arg.lower() == known_cls.lower(): method_scope[arg.arg] = known_cls
 
         for stmt in ast.walk(method_node):
             
-            # Detectar atributos self.x = valor
             if isinstance(stmt, ast.Assign):
                 for target in stmt.targets:
                     if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name) and target.value.id == 'self':
                         inferred_type = infer_simple_type(stmt.value)
                         cls_info.add_attr(target.attr, inferred_type, stmt.lineno)
 
-            # Detectar instanciação local: var = Classe(...)
             if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call) and isinstance(stmt.value.func, ast.Name):
                 cls_name = stmt.value.func.id
                 real_cls = file_scope.get(cls_name, cls_name)
@@ -259,7 +239,6 @@ class ProjectAnalyzer:
                             local_instances[target.id] = real_cls
                             cls_info.add_relation('dep', real_cls)
 
-            # Detectar append: self.lista.append(obj)
             if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
                 func = stmt.value.func
                 if isinstance(func, ast.Attribute) and func.attr == 'append':
@@ -282,7 +261,6 @@ class ProjectAnalyzer:
                             elif var_name in method_scope:
                                 cls_info.add_relation('agg', method_scope[var_name], "0..*")
 
-            # Exceptions
             if isinstance(stmt, ast.Raise):
                 if isinstance(stmt.exc, ast.Call) and isinstance(stmt.exc.func, ast.Name):
                     if stmt.exc.func.id in file_scope:
@@ -325,11 +303,9 @@ class ProjectAnalyzer:
         relevant_classes = set()
         abs_entry = str(self.entry_point)
         
-        # 1. Definidas no arquivo
         for name, info in self.global_classes.items():
             if info.filepath == abs_entry: relevant_classes.add(name)
 
-        # 2. Usadas no arquivo
         tree = self.files_ast.get(abs_entry)
         if tree:
             for node in ast.walk(tree):
@@ -339,7 +315,6 @@ class ProjectAnalyzer:
                     for alias in node.names:
                         if alias.name in self.global_classes: relevant_classes.add(alias.name)
 
-        # 3. BFS
         queue = deque(relevant_classes)
         processed = set(relevant_classes)
         while queue:
@@ -362,11 +337,11 @@ class ProjectAnalyzer:
 
 def generate_markdown(classes, flow, title, root_dir, is_web=False, repo_url=""):
     lines = []
-    lines.append(f"# 📘 Documentação: {title}")
+    lines.append(f"# Documentação: {title}")
     lines.append(f"> Gerado automaticamente via AutoDoc.py - Criado por [FrantzJupiter](https://github.com/FrantzJupiter/AutoDocUML)")
     
     if flow:
-        lines.append("\n## 🚀 Fluxo de Execução (Main)")
+        lines.append("\n## Fluxo de Execução (Main)")
         lines.append("```mermaid")
         lines.append("graph TD")
         lines.append("Start([Início])")
@@ -379,7 +354,7 @@ def generate_markdown(classes, flow, title, root_dir, is_web=False, repo_url="")
         lines.append(f"{last} --> End([Fim])")
         lines.append("```")
 
-    lines.append("\n## 🏗️ Diagrama de Classes Unificado")
+    lines.append("\n## Diagrama de Classes Unificado")
     lines.append("```mermaid")
     lines.append("classDiagram")
     lines.append("direction TB")
@@ -423,28 +398,28 @@ def generate_markdown(classes, flow, title, root_dir, is_web=False, repo_url="")
 
     lines.append("```")
 
-    lines.append("\n## 📍 Índice de Navegação")
+    lines.append("\n## Índice de Navegação")
     by_file = defaultdict(list)
     for name, cls in classes.items():
         by_file[os.path.basename(cls.filepath)].append(cls)
 
     for filename in sorted(by_file.keys()):
-        lines.append(f"\n### 📂 `{filename}`")
+        lines.append(f"\n### `{filename}`")
         for cls in sorted(by_file[filename], key=lambda x: x.name):
             link = get_link(cls.filepath, cls.lineno, root_dir, is_web, repo_url)
-            lines.append(f"- 🟡 **[{cls.name}]({link})** (Linha {cls.lineno})")
+            lines.append(f"- **[{cls.name}]({link})** (Linha {cls.lineno})")
             
             if cls.attrs:
                 lines.append("  - **Atributos:**")
                 for attr, info in cls.attrs.items():
                     l = get_link(cls.filepath, info['line'], root_dir, is_web, repo_url)
-                    lines.append(f"    - 🔹 [{attr}]({l}) : `{info['type']}`")
+                    lines.append(f"    - [{attr}]({l}) : `{info['type']}`")
             
             if cls.methods:
                 lines.append("  - **Métodos:**")
                 for m in cls.methods:
                     l = get_link(cls.filepath, m['line'], root_dir, is_web, repo_url)
-                    lines.append(f"    - 🔸 [{m['name']}()]({l})")
+                    lines.append(f"    - [{m['name']}()]({l})")
     
     return "\n".join(lines)
 
@@ -453,26 +428,27 @@ if __name__ == "__main__":
         try: sys.stdout.reconfigure(encoding='utf-8')
         except: pass
         
-    parser = argparse.ArgumentParser(description="Gera documentação UML e fluxos em Markdown a partir de código Python.")
+    parser = argparse.ArgumentParser(description="Gera documentacao UML e fluxos em Markdown a partir de codigo Python.")
     parser.add_argument("target_input", help="Caminho para o arquivo principal (.py)")
     parser.add_argument("--web", action="store_true", help="Gera links para o GitHub em vez do VS Code")
-    parser.add_argument("--repo", default="https://github.com/FrantzJupiter/AutoDocUML", help="URL base do repositório no GitHub")
+    parser.add_argument("--repo", default="https://github.com/FrantzJupiter/AutoDocUML", help="URL base do repositorio no GitHub")
     
     args = parser.parse_args()
     target_input = args.target_input
 
     if not os.path.exists(target_input):
-        print("❌ Arquivo não encontrado."); sys.exit(1)
+        print("[Erro] Arquivo não encontrado.")
+        sys.exit(1)
 
     analyzer = ProjectAnalyzer(target_input)
     classes, flow = analyzer.run()
 
     if not classes:
-        print("⚠️ Nenhuma classe detectada ou escopo vazio."); sys.exit(0)
+        print("[Aviso] Nenhuma classe detectada ou escopo vazio.")
+        sys.exit(0)
 
     output_name = f"AutoDoc_{Path(target_input).stem}.md"
     
-    # Chama a geração do Markdown passando as flags de web, o repo e o diretório raiz
     md_content = generate_markdown(
         classes=classes, 
         flow=flow, 
@@ -485,4 +461,4 @@ if __name__ == "__main__":
     with open(output_name, "w", encoding="utf-8") as f: 
         f.write(md_content)
         
-    print(f"\n✅ Documentação gerada com sucesso: {output_name}")
+    print(f"[Sucesso] Documentação gerada: {output_name}")

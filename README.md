@@ -1,4 +1,4 @@
-# 🚀 AutoDocUML
+# AutoDocUML
 
 **Geração Automática de Documentação e Diagramas UML para Projetos Python.**
 
@@ -8,16 +8,16 @@ Perfeito para documentar portfólios, agilizar o *onboarding* de novos desenvolv
 
 ---
 
-## ✨ Funcionalidades
+## Funcionalidades
 
-- 🧠 **Análise Estática Inteligente (AST):** Lê o código sem precisar executá-lo, garantindo segurança e rapidez.
-- 🏗️ **Diagrama de Classes Unificado:** Detecta automaticamente Herança, Composição, Agregação e Dependência entre as classes.
-- 🛤️ **Mapeamento de Fluxo (Main Flow):** Rastreia as chamadas de métodos e instanciação de objetos a partir de um arquivo principal.
-- 🔗 **Links Dinâmicos:** Gera índices de navegação clicáveis que apontam para as linhas exatas do código no **VS Code** (uso local) ou no **GitHub** (uso web/portfólio).
+- **Análise Estática Inteligente (AST):** Lê o código sem precisar executá-lo, garantindo segurança e rapidez.
+- **Diagrama de Classes Unificado:** Detecta automaticamente Herança, Composição, Agregação e Dependência entre as classes.
+- **Mapeamento de Fluxo (Main Flow):** Rastreia as chamadas de métodos e instanciação de objetos a partir de um arquivo principal.
+- **Links Dinâmicos:** Gera índices de navegação clicáveis que apontam para as linhas exatas do código no **VS Code** (uso local) ou no **GitHub** (uso web/portfólio).
 
 ---
 
-## 📊 Exemplo Prático (Showcase)
+## Exemplo Prático (Showcase)
 
 Para demonstrar o poder do AutoDocUML, rodamos a ferramenta em um **Sistema de Streaming** construído em Python. Veja o que ele é capaz de gerar automaticamente apenas lendo o código:
 
@@ -112,7 +112,7 @@ S10 --> End([Fim])
 
 ---
 
-## 🚀 Como Instalar e Usar
+## Como Instalar e Usar
 
 **Pré-requisitos:** Python 3.6 ou superior (usa apenas bibliotecas nativas, sem necessidade de `pip install`).
 
@@ -139,7 +139,7 @@ python AutoDoc.py caminho/para/seu_arquivo_principal.py --web --repo [https://gi
 
 ---
 
-## 👨‍💻 Desenvolvedor
+## Desenvolvedor
 Projeto criado e mantido por:
 - [Luis Frantz Granado Junior](https://github.com/FrantzJupiter)
 
