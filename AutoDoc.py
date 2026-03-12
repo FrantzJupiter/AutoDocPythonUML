@@ -6,12 +6,7 @@ import argparse
 from pathlib import Path
 from collections import deque, defaultdict
 
-# ==========================================
-# 1. HELPERS E LINKS
-# ==========================================
-
 def get_link(file_path, line, root_dir, is_web=False, repo_url=""):
-    """Gera links dinamicamente: locais (vscode://) ou remotos (GitHub/Web)."""
     try:
         abs_path = Path(file_path).resolve()
         
@@ -42,7 +37,6 @@ def format_annotation(node):
     except: return "Any"
 
 def infer_simple_type(node):
-    """Infere o tipo baseado no valor atribuido no AST."""
     if isinstance(node, ast.Constant):
         return type(node.value).__name__
     elif isinstance(node, ast.List):
@@ -67,10 +61,6 @@ def get_base_types(node):
         elif isinstance(curr, ast.Tuple):
             for elt in curr.elts: queue.append(elt)
     return found
-
-# ==========================================
-# 2. ESTRUTURAS DE DADOS
-# ==========================================
 
 class ClassInfo:
     def __init__(self, name, filepath, lineno):
@@ -117,19 +107,14 @@ class ExecutionStep:
         self.line = line
         self.file = file
 
-# ==========================================
-# 3. CORE ANALYZER
-# ==========================================
-
 class ProjectAnalyzer:
     def __init__(self, entry_point):
         self.entry_point = Path(entry_point).resolve()
         self.root_dir = self.entry_point.parent if self.entry_point.is_file() else self.entry_point
-        self.base_repo_dir = Path.cwd() 
         self.global_classes = {} 
         self.files_ast = {}      
-        self.main_flow = []
-        
+        self.main_flow = []      
+
     def run(self):
         print(f"Indexando projeto a partir de: {self.root_dir}")
         self._step_1_index_files()
@@ -332,14 +317,10 @@ class ProjectAnalyzer:
         
         return {k: v for k, v in self.global_classes.items() if k in relevant_classes}, self.main_flow
 
-# ==========================================
-# 4. GERAÇÃO DE MARKDOWN
-# ==========================================
-
 def generate_markdown(classes, flow, title, root_dir, is_web=False, repo_url=""):
     lines = []
     lines.append(f"# Documentação: {title}")
-    lines.append(f"> Gerado automaticamente via [AutoDoc.py](https://github.com/FrantzJupiter/AutoDocUML) - Criado por [FrantzJupiter](https://github.com/FrantzJupiter)")
+    lines.append(f"> Gerado automaticamente via AutoDoc.py - Criado por [FrantzJupiter](https://github.com/FrantzJupiter/AutoDocUML)")
     
     if flow:
         lines.append("\n## Fluxo de Execução (Main)")
@@ -435,31 +416,33 @@ if __name__ == "__main__":
     parser.add_argument("--repo", default="https://github.com/FrantzJupiter/AutoDocUML", help="URL base do repositorio no GitHub")
     
     args = parser.parse_args()
-    target_input = args.target_input
+    target_path = Path(args.target_input).resolve()
 
-    if not os.path.exists(target_input):
+    if not target_path.exists():
         print("[Erro] Arquivo não encontrado.")
         sys.exit(1)
 
-    analyzer = ProjectAnalyzer(target_input)
+    analyzer = ProjectAnalyzer(str(target_path))
     classes, flow = analyzer.run()
 
     if not classes:
         print("[Aviso] Nenhuma classe detectada ou escopo vazio.")
         sys.exit(0)
 
-    output_name = f"AutoDoc_{Path(target_input).stem}.md"
+    # Modificado para salvar o Markdown na mesma pasta do arquivo analisado
+    output_path = target_path.parent / f"AutoDoc_{target_path.stem}.md"
     
+    # Modificado para usar o diretório de execução atual (raiz do repositório) como base para os links web
     md_content = generate_markdown(
         classes=classes, 
         flow=flow, 
-        title=Path(target_input).name, 
-        root_dir=analyzer.root_dir,
+        title=target_path.name, 
+        root_dir=Path.cwd(),
         is_web=args.web, 
         repo_url=args.repo
     )
     
-    with open(output_name, "w", encoding="utf-8") as f: 
+    with open(output_path, "w", encoding="utf-8") as f: 
         f.write(md_content)
         
-    print(f"[Sucesso] Documentação gerada: {output_name}")
+    print(f"[Sucesso] Documentação gerada em: {output_path}")
